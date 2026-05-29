@@ -9,7 +9,9 @@
     admin_requires_token/1,
     admin_issue_via_api/1,
     upstream_error_is_generic/1,
-    atomic_budget_under_concurrency/1
+    atomic_budget_under_concurrency/1,
+    anthropic_stream_proxies_and_accounts/1,
+    openai_stream_proxies_and_accounts/1
 ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -27,7 +29,9 @@ all() ->
         admin_requires_token,
         admin_issue_via_api,
         upstream_error_is_generic,
-        atomic_budget_under_concurrency
+        atomic_budget_under_concurrency,
+        anthropic_stream_proxies_and_accounts,
+        openai_stream_proxies_and_accounts
     ].
 
 init_per_suite(Config) ->
@@ -172,7 +176,56 @@ atomic_budget_under_concurrency(Config) ->
     %% atomic increment: every concurrent forward counted, none lost (N * 18)
     ?assertEqual(N * 18, maps:get(spent_tokens, Key)).
 
+anthropic_stream_proxies_and_accounts(Config) ->
+    Base = ?config(stub_base, Config),
+    {ok, UpId} = sekisho_upstreams:create(#{
+        name => ~"stub-stream-a",
+        format => ~"anthropic",
+        base_url => Base,
+        auth_mode => ~"api_key",
+        credential => ~"sk-stub"
+    }),
+    {ok, #{id := KeyId, token := Token}} = sekisho_keys:issue(~"team-s", UpId, infinity),
+    {Code, CT, Resp} = post_stream("/anthropic/v1/messages", Token, #{
+        ~"model" => ~"claude", ~"messages" => [], ~"stream" => true
+    }),
+    ?assertEqual(200, Code),
+    ?assertMatch(<<"text/event-stream", _/binary>>, CT),
+    ?assertNotEqual(nomatch, binary:match(Resp, ~"message_stop")),
+    [Row] = ledger_rows(KeyId),
+    ?assertEqual(11, maps:get(input_tokens, Row)),
+    ?assertEqual(7, maps:get(output_tokens, Row)).
+
+openai_stream_proxies_and_accounts(Config) ->
+    Base = ?config(stub_base, Config),
+    {ok, UpId} = sekisho_upstreams:create(#{
+        name => ~"stub-stream-o",
+        format => ~"openai",
+        base_url => Base,
+        auth_mode => ~"api_key",
+        credential => ~"AIza-stub"
+    }),
+    {ok, #{id := KeyId, token := Token}} = sekisho_keys:issue(~"team-s", UpId, infinity),
+    {Code, CT, Resp} = post_stream("/openai/v1/chat/completions", Token, #{
+        ~"model" => ~"gemini", ~"messages" => [], ~"stream" => true
+    }),
+    ?assertEqual(200, Code),
+    ?assertMatch(<<"text/event-stream", _/binary>>, CT),
+    ?assertNotEqual(nomatch, binary:match(Resp, ~"[DONE]")),
+    [Row] = ledger_rows(KeyId),
+    ?assertEqual(13, maps:get(input_tokens, Row)),
+    ?assertEqual(5, maps:get(output_tokens, Row)).
+
 %% --- helpers ---
+
+post_stream(Path, Token, BodyMap) ->
+    Url = "http://127.0.0.1:8080" ++ Path,
+    Body = iolist_to_binary(json:encode(BodyMap)),
+    Headers = [{"x-api-key", binary_to_list(Token)}],
+    {ok, {{_, Code, _}, RespHeaders, Resp}} =
+        httpc:request(post, {Url, Headers, "application/json", Body}, [], [{body_format, binary}]),
+    CT = list_to_binary(proplists:get_value("content-type", RespHeaders, "")),
+    {Code, CT, Resp}.
 
 admin_post(Path, Token, BodyMap) ->
     Url = "http://127.0.0.1:8080" ++ Path,
