@@ -1,0 +1,7 @@
+_build
+.git
+doc
+logs
+*.crashdump
+erl_crash.dump
+.rebar3
