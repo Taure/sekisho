@@ -16,7 +16,7 @@
         {use_stacktrace, false},
         {environment, prod},
         {cowboy_configuration, #{
-            port => 8080
+            port => ${PORT}
         }},
         {dev_mode, false},
         {bootstrap_application, sekisho},
@@ -33,7 +33,7 @@
                 driver_module => kura_driver_pgo,
                 database => ~"${SEKISHO_DB}",
                 hostname => ~"${SEKISHO_DB_HOST}",
-                port => 5432,
+                port => ${SEKISHO_DB_PORT},
                 username => ~"${SEKISHO_DB_USER}",
                 password => ~"${SEKISHO_DB_PASSWORD}",
                 pool_size => 10
