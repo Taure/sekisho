@@ -18,6 +18,10 @@ This mirrors the `gakudan_liveboard_sse` pattern (see novaframework/nova#387).
 
 -include_lib("kernel/include/logger.hrl").
 
+%% handle_stream/3's 2nd arg is Nova's controller callback - part of the
+%% return-handler contract, unused here.
+-hank([{unnecessary_function_arguments, [{handle_stream, 3, 2}]}]).
+
 -export([forward/2, register/0, handle_stream/3]).
 %% Pure helpers, exported for unit tests.
 -export([key_from_headers/1, target_url/5, rewrite_body/4, usage/2, stream_usage/2]).
