@@ -5,6 +5,25 @@ checkpoint") - an LLM gateway for the BEAM. A deployable Nova service on
 kura/Postgres that custodies provider credentials, issues per-team virtual keys,
 accounts every request, enforces budgets, and writes an audit trail.
 
+## Ecosystem
+
+Part of a BEAM-native multi-agent stack (all under https://github.com/Taure):
+
+- **[gakudan](https://github.com/Taure/gakudan)** - agent orchestration runtime.
+- **[saiten](https://github.com/Taure/saiten)** - runtime-agnostic eval/scoring
+  + CI gate.
+- **[madoguchi](https://github.com/Taure/madoguchi)** - MCP *server* framework.
+- **sekisho** - LLM gateway / control plane: virtual keys, cost ledger, budgets,
+  and audit in front of Anthropic / Gemini / Vertex.
+
+Gakudan sister libs: **gakudan_metrics**, **gakudan_otel**, **gakudan_tickets**
+(+ **gakudan_tickets_github**), **gakudan_liveboard**.
+
+**This repo** is the control plane beneath everything: any agent, tool, or
+service (in any language) routes its LLM traffic here for central keys, cost
+attribution, budgets, and audit. It custodies provider credentials, so security
+is the priority - see [ADR 0001](docs/adr/0001-gateway-security-model.md).
+
 ## Design pillars
 
 - **Control plane, not a library.** One endpoint every team/tool points at
