@@ -4,20 +4,31 @@ The forward path shared by both lanes. Authenticates the virtual key, enforces
 the budget, resolves the upstream, forwards the request (rewriting only what the
 upstream needs), accounts the usage, and returns the provider's response.
 
-Streaming (`stream: true`) is handled by buffering the upstream SSE and replaying
-it as a single `text/event-stream` body - protocol-correct, with usage accounted.
-True incremental push-streaming is a fast-follow (needs a Nova streaming handler;
-Nova finalises the reply after a controller, so a controller cannot push chunks).
+Non-streaming requests are forwarded synchronously and returned as a buffered
+body. Streaming requests (`stream: true`) use true SSE passthrough: the
+controller returns `{stream, ...}`, picked up by a Nova return-handler
+(`handle_stream/3`, registered via `register/0`). That handler forwards to the
+upstream with `httpc` async streaming, relays each chunk to the client with
+`cowboy_req:stream_body/3`, accounts usage at `stream_end`, and then exits -
+never returning, so Nova's post-handler `cowboy_req:reply` (which would crash
+with `{response_already_sent}`) never runs. The stream-vs-error decision is made
+before `stream_reply`, so an upstream that errors still yields a clean status.
+This mirrors the `gakudan_liveboard_sse` pattern (see novaframework/nova#387).
 """.
 
 -include_lib("kernel/include/logger.hrl").
 
--export([forward/2]).
+-export([forward/2, register/0, handle_stream/3]).
 %% Pure helpers, exported for unit tests.
--export([key_from_headers/1, target_url/5, rewrite_body/4, usage/2]).
+-export([key_from_headers/1, target_url/5, rewrite_body/4, usage/2, stream_usage/2]).
 
 -define(TIMEOUT, 120_000).
 -define(VERTEX_ANTHROPIC_VERSION, ~"vertex-2023-10-16").
+
+-doc "Register the `{stream, ...}` Nova return-handler. Call once at app start.".
+-spec register() -> ok | {error, atom()}.
+register() ->
+    nova_handlers:register_handler(stream, fun ?MODULE:handle_stream/3).
 
 -doc "Forward an Anthropic- or OpenAI-format request through the gateway.".
 -spec forward(anthropic | openai, cowboy_req:req()) -> tuple().
@@ -50,30 +61,122 @@ forward_authorized(Lane, Key, Body) ->
             Stream = maps:get(~"stream", BodyMap, false) =:= true,
             Sent = rewrite_body(Format, AuthMode, BodyMap, Stream),
             Url = target_url(Format, AuthMode, BaseUrl, Sent, Stream),
-            do_request(Format, Key, Model, Url, AuthHeaders, Sent, Stream);
+            case Stream of
+                true ->
+                    {stream, 200, sse_headers(), #{
+                        url => Url,
+                        auth_headers => AuthHeaders,
+                        body => Sent,
+                        format => Format,
+                        key => Key,
+                        model => Model
+                    }};
+                false ->
+                    do_request(Format, Key, Model, Url, AuthHeaders, Sent)
+            end;
         {error, Reason} ->
             ?LOG_ERROR(#{event => upstream_resolve_failed, reason => Reason}),
             {status, 502, json_headers(), json(#{error => ~"upstream unavailable"})}
     end.
 
-do_request(Format, Key, Model, Url, AuthHeaders, BodyMap, Stream) ->
+%% --- non-streaming forward ---
+
+do_request(Format, Key, Model, Url, AuthHeaders, BodyMap) ->
     ensure_started(),
-    Headers = http_headers(AuthHeaders),
     Request = {
-        binary_to_list(Url), Headers, "application/json", iolist_to_binary(json:encode(BodyMap))
+        binary_to_list(Url),
+        http_headers(AuthHeaders),
+        "application/json",
+        iolist_to_binary(json:encode(BodyMap))
     },
     HttpOpts = [{timeout, ?TIMEOUT}, {ssl, sekisho_http:ssl_opts()}],
     case httpc:request(post, Request, HttpOpts, [{body_format, binary}]) of
         {ok, {{_, 200, _}, _RespHeaders, RespBody}} ->
-            {In, Out} = extract_usage(Format, RespBody, Stream),
+            {In, Out} = usage(Format, json:decode(RespBody)),
             _ = sekisho_ledger:record(Key, Model, In, Out),
-            {status, 200, resp_headers(Stream), RespBody};
+            {status, 200, json_headers(), RespBody};
         {ok, {{_, Code, _}, _RespHeaders, RespBody}} ->
-            {status, Code, resp_headers(Stream), RespBody};
+            {status, Code, json_headers(), RespBody};
         {error, Reason} ->
             ?LOG_ERROR(#{event => upstream_request_failed, reason => Reason}),
             {status, 502, json_headers(), json(#{error => ~"upstream error"})}
     end.
+
+%% --- streaming forward (true SSE passthrough) ---
+
+-doc "Nova `{stream, ...}` return-handler. Holds the connection; never returns on success.".
+handle_stream({stream, Code, Headers, Spec}, _Callback, Req0) ->
+    ensure_started(),
+    #{url := Url, auth_headers := AuthHeaders, body := Body} = Spec,
+    Request = {
+        binary_to_list(Url),
+        [{"accept", "text/event-stream"} | http_headers(AuthHeaders)],
+        "application/json",
+        iolist_to_binary(json:encode(Body))
+    },
+    HttpOpts = [{timeout, ?TIMEOUT}, {ssl, sekisho_http:ssl_opts()}],
+    AsyncOpts = [{sync, false}, {stream, self}, {body_format, binary}],
+    case httpc:request(post, Request, HttpOpts, AsyncOpts) of
+        {ok, ReqId} ->
+            await_first(ReqId, Code, Headers, Req0, Spec);
+        {error, Reason} ->
+            ?LOG_ERROR(#{event => upstream_stream_failed, reason => Reason}),
+            error_reply(Req0, 502, ~"upstream error")
+    end.
+
+%% Decide stream-vs-error from the first async message, before stream_reply.
+await_first(ReqId, Code, Headers, Req0, Spec) ->
+    receive
+        {http, {ReqId, stream_start, _Hdrs}} ->
+            Req = cowboy_req:stream_reply(Code, Headers, Req0),
+            relay(ReqId, Req, Spec, <<>>);
+        {http, {ReqId, {{_, UpCode, _}, _Hdrs, UpBody}}} ->
+            %% Non-2xx: httpc does not stream it. Pass the provider status + body
+            %% through as a normal buffered reply.
+            passthrough_reply(Req0, UpCode, UpBody);
+        {http, {ReqId, {error, Reason}}} ->
+            ?LOG_ERROR(#{event => upstream_stream_error, reason => Reason}),
+            error_reply(Req0, 502, ~"upstream error")
+    after ?TIMEOUT ->
+        _ = httpc:cancel_request(ReqId),
+        error_reply(Req0, 504, ~"upstream timeout")
+    end.
+
+%% Relay each upstream chunk to the client, accumulating for usage accounting.
+relay(ReqId, Req, Spec, Acc) ->
+    receive
+        {http, {ReqId, stream, Chunk}} ->
+            ok = cowboy_req:stream_body(Chunk, nofin, Req),
+            relay(ReqId, Req, Spec, <<Acc/binary, Chunk/binary>>);
+        {http, {ReqId, stream_end, _Hdrs}} ->
+            %% Account before fin, so usage is durable before the client sees the
+            %% stream complete.
+            account_stream(Spec, Acc),
+            ok = cowboy_req:stream_body(<<>>, fin, Req),
+            exit(normal);
+        {http, {ReqId, {error, Reason}}} ->
+            ?LOG_ERROR(#{event => upstream_stream_interrupted, reason => Reason}),
+            _ = cowboy_req:stream_body(<<>>, fin, Req),
+            exit(normal)
+    after ?TIMEOUT ->
+        _ = httpc:cancel_request(ReqId),
+        _ = cowboy_req:stream_body(<<>>, fin, Req),
+        exit(normal)
+    end.
+
+account_stream(#{format := Format, key := Key, model := Model}, Acc) ->
+    {In, Out} = stream_usage(Format, Acc),
+    _ = sekisho_ledger:record(Key, Model, In, Out),
+    ok.
+
+%% Buffered reply built without stream_reply, so Nova's render_response replies.
+error_reply(Req0, Code, Message) ->
+    passthrough_reply(Req0, Code, json(#{error => Message})).
+
+passthrough_reply(Req0, Code, Body) ->
+    Req1 = cowboy_req:set_resp_headers(json_headers(), Req0),
+    Req2 = cowboy_req:set_resp_body(Body, Req1#{resp_status_code => Code}),
+    {ok, Req2}.
 
 %% --- auth ---
 
@@ -128,12 +231,7 @@ rewrite_body(_Format, _AuthMode, Body, _Stream) ->
 
 %% --- usage extraction ---
 
-extract_usage(Format, RespBody, false) ->
-    usage(Format, json:decode(RespBody));
-extract_usage(Format, RespBody, true) ->
-    usage(Format, last_sse_object(RespBody)).
-
--doc "Pull `{input, output}` tokens from a decoded provider response.".
+-doc "Pull `{input, output}` tokens from a decoded (non-stream) provider response.".
 -spec usage(binary(), map()) -> {non_neg_integer(), non_neg_integer()}.
 usage(~"anthropic", #{~"usage" := #{~"input_tokens" := In, ~"output_tokens" := Out}}) ->
     {In, Out};
@@ -142,42 +240,55 @@ usage(~"openai", #{~"usage" := #{~"prompt_tokens" := In, ~"completion_tokens" :=
 usage(_Format, _Other) ->
     {0, 0}.
 
-%% The last `data:` JSON object in an SSE body that carries a usage field.
-last_sse_object(Body) ->
-    Lines = binary:split(Body, ~"\n", [global]),
-    Objects = [decode_data(L) || L <- Lines, is_data_line(L)],
-    last_with_usage(Objects).
+-doc """
+Pull `{input, output}` tokens from an accumulated SSE stream body. OpenAI puts
+both in the final usage chunk; Anthropic splits them across `message_start`
+(input) and the last `message_delta` (output).
+""".
+-spec stream_usage(binary(), binary()) -> {non_neg_integer(), non_neg_integer()}.
+stream_usage(~"openai", Body) ->
+    usage(~"openai", last_with_usage(sse_objects(Body), #{}));
+stream_usage(~"anthropic", Body) ->
+    Objects = sse_objects(Body),
+    {anthropic_input(Objects), anthropic_output(Objects, 0)};
+stream_usage(_Format, _Body) ->
+    {0, 0}.
+
+sse_objects(Body) ->
+    [decode_data(L) || L <- binary:split(Body, ~"\n", [global]), is_data_line(L)].
 
 is_data_line(<<"data:", _/binary>>) -> true;
 is_data_line(_) -> false.
 
 decode_data(<<"data:", Rest/binary>>) ->
-    Trimmed = string:trim(Rest),
     try
-        json:decode(Trimmed)
+        json:decode(string:trim(Rest))
     catch
         _:_ -> #{}
     end.
 
-last_with_usage(Objects) ->
-    last_with_usage(Objects, #{}).
+last_with_usage([], Acc) -> Acc;
+last_with_usage([#{~"usage" := U} = Obj | Rest], _Acc) when is_map(U) -> last_with_usage(Rest, Obj);
+last_with_usage([_ | Rest], Acc) -> last_with_usage(Rest, Acc).
 
-last_with_usage([], Acc) ->
-    Acc;
-last_with_usage([#{~"usage" := U} = Obj | Rest], _Acc) when is_map(U) ->
-    last_with_usage(Rest, Obj);
-last_with_usage([_ | Rest], Acc) ->
-    last_with_usage(Rest, Acc).
+anthropic_input([#{~"message" := #{~"usage" := #{~"input_tokens" := N}}} | _]) -> N;
+anthropic_input([_ | Rest]) -> anthropic_input(Rest);
+anthropic_input([]) -> 0.
+
+anthropic_output([#{~"usage" := #{~"output_tokens" := M}} | Rest], _Acc) ->
+    anthropic_output(Rest, M);
+anthropic_output([_ | Rest], Acc) ->
+    anthropic_output(Rest, Acc);
+anthropic_output([], Acc) ->
+    Acc.
 
 %% --- helpers ---
 
 http_headers(AuthHeaders) ->
     [{binary_to_list(K), binary_to_list(V)} || {K, V} <- AuthHeaders].
 
-resp_headers(true) ->
-    #{~"content-type" => ~"text/event-stream"};
-resp_headers(false) ->
-    json_headers().
+sse_headers() ->
+    #{~"content-type" => ~"text/event-stream", ~"cache-control" => ~"no-cache"}.
 
 json_headers() ->
     #{~"content-type" => ~"application/json"}.

@@ -7,6 +7,7 @@
 
 start(_StartType, _StartArgs) ->
     ok = run_migrations(),
+    _ = sekisho_gateway:register(),
     sekisho_sup:start_link().
 
 stop(_State) ->
