@@ -1,0 +1,27 @@
+%% -*- mode: erlang;erlang-indent-level: 4;indent-tabs-mode: nil -*-
+{application, sekisho, [
+    {description,
+        "LLM gateway for the BEAM - virtual keys, cost ledger, budgets, and audit in front of Anthropic, Gemini, and Vertex"},
+    {vsn, git},
+    {registered, []},
+    {mod, {sekisho_app, []}},
+    {included_applications, []},
+    {applications, [
+        kernel,
+        stdlib,
+        crypto,
+        public_key,
+        ssl,
+        inets,
+        %% pgo + kura_postgres must start before kura: kura is driver-agnostic
+        %% and starts its pools at boot, which needs the pgo pool supervisor up.
+        pgo,
+        kura_postgres,
+        kura,
+        nova
+    ]},
+    {env, []},
+    {modules, []},
+    {licenses, ["MIT"]},
+    {links, [{"GitHub", "https://github.com/Taure/sekisho"}]}
+]}.

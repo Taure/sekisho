@@ -1,0 +1,71 @@
+name: Claude Code
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, labeled]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  claude:
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issues' && github.event.action == 'opened' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude'))) ||
+      (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'claude-try')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code (label-triggered auto-fix)
+        if: github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'claude-try'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Issue #${{ github.event.issue.number }} was just labeled `claude-try`
+            by triagebot. The issue title is: ${{ github.event.issue.title }}.
+
+            Read the issue body and any triage comment, then:
+
+            1. Make a plan for the smallest correct fix.
+            2. Implement it on a new branch named `claude/issue-${{ github.event.issue.number }}-<short-slug>`.
+            3. Run the project's checks: `rebar3 fmt --check`, `rebar3 xref`,
+               `rebar3 dialyzer`, `rebar3 eunit`, `rebar3 ct`. Fix any
+               failures introduced by your change before opening the PR.
+            4. Open a pull request that closes #${{ github.event.issue.number }}.
+               Title format: `<type>(<scope>): <short description>`. Conventional
+               commit types only. The PR body should briefly explain the change,
+               link to the issue, and include a short test plan.
+
+            If the issue is not in fact actionable (e.g. it asks for design
+            discussion, or the reproducer is too vague), post a comment on
+            the issue explaining what you'd need to proceed and STOP - do
+            not open a PR.
+
+            Never push to `main`. Always work on a new branch.
+          claude_args: |
+            --max-turns 40
+            --allowedTools "Read,Write,Edit,Glob,Grep,Bash(rebar3 *),Bash(git *),Bash(gh *),Bash(ls *),Bash(cat *),Bash(find *),Bash(grep *),Bash(mkdir *),Bash(echo *)"
+
+      - name: Run Claude Code (interactive @claude mention)
+        if: github.event_name != 'issues' || github.event.action != 'labeled'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: |
+            --max-turns 20

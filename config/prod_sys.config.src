@@ -1,0 +1,46 @@
+%% -*- mode: erlang;erlang-indent-level: 4;indent-tabs-mode: nil -*-
+
+[
+    {kernel, [
+        {logger_level, info},
+        {logger, [
+            {handler, default, logger_std_h, #{
+                formatter => {nova_jsonlogger, #{
+                    map_depth => 3,
+                    term_depth => 50
+                }}
+            }}
+        ]}
+    ]},
+    {nova, [
+        {use_stacktrace, false},
+        {environment, prod},
+        {cowboy_configuration, #{
+            port => 8080
+        }},
+        {dev_mode, false},
+        {bootstrap_application, sekisho},
+        {json_lib, json},
+        {plugins, [
+            {pre_request, nova_request_plugin, #{decode_json_body => true}}
+        ]}
+    ]},
+    {kura, [
+        {dialect, kura_dialect_pg},
+        {repos, #{
+            sekisho_repo => #{
+                pool_module => kura_pool_pgo,
+                driver_module => kura_driver_pgo,
+                database => ~"${SEKISHO_DB}",
+                hostname => ~"${SEKISHO_DB_HOST}",
+                port => 5432,
+                username => ~"${SEKISHO_DB_USER}",
+                password => ~"${SEKISHO_DB_PASSWORD}",
+                pool_size => 10
+            }
+        }}
+    ]},
+    {sekisho, [
+        {nova_apps, []}
+    ]}
+].
