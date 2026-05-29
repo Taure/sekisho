@@ -20,7 +20,7 @@ target_anthropic_public_test() ->
     ?assertEqual(
         ~"https://api.anthropic.com/v1/messages",
         sekisho_gateway:target_url(
-            ~"anthropic", ~"api_key", ~"https://api.anthropic.com", #{}, false
+            ~"anthropic", chat, ~"api_key", ~"https://api.anthropic.com", #{}, false
         )
     ).
 
@@ -28,7 +28,20 @@ target_openai_public_test() ->
     ?assertEqual(
         ~"https://gen.googleapis.com/v1beta/openai/chat/completions",
         sekisho_gateway:target_url(
-            ~"openai", ~"api_key", ~"https://gen.googleapis.com/v1beta/openai", #{}, false
+            ~"openai", chat, ~"api_key", ~"https://gen.googleapis.com/v1beta/openai", #{}, false
+        )
+    ).
+
+target_openai_embeddings_test() ->
+    ?assertEqual(
+        ~"https://gen.googleapis.com/v1beta/openai/embeddings",
+        sekisho_gateway:target_url(
+            ~"openai",
+            embeddings,
+            ~"api_key",
+            ~"https://gen.googleapis.com/v1beta/openai",
+            #{},
+            false
         )
     ).
 
@@ -37,14 +50,14 @@ target_anthropic_vertex_test() ->
     ?assertEqual(
         <<Base/binary, "/publishers/anthropic/models/claude-x:rawPredict">>,
         sekisho_gateway:target_url(
-            ~"anthropic", ~"gcp_oauth", Base, #{~"model" => ~"claude-x"}, false
+            ~"anthropic", chat, ~"gcp_oauth", Base, #{~"model" => ~"claude-x"}, false
         )
     ).
 
 target_anthropic_vertex_stream_test() ->
     Base = ~"https://eu-aiplatform.googleapis.com/v1/projects/p/locations/eu",
     Url = sekisho_gateway:target_url(
-        ~"anthropic", ~"gcp_oauth", Base, #{~"model" => ~"claude-x"}, true
+        ~"anthropic", chat, ~"gcp_oauth", Base, #{~"model" => ~"claude-x"}, true
     ),
     ?assertEqual(nomatch =/= binary:match(Url, ~":streamRawPredict"), true).
 
@@ -70,7 +83,7 @@ rewrite_noop_test() ->
 usage_anthropic_test() ->
     ?assertEqual(
         {11, 7},
-        sekisho_gateway:usage(~"anthropic", #{
+        sekisho_gateway:usage(~"anthropic", chat, #{
             ~"usage" => #{~"input_tokens" => 11, ~"output_tokens" => 7}
         })
     ).
@@ -78,10 +91,19 @@ usage_anthropic_test() ->
 usage_openai_test() ->
     ?assertEqual(
         {13, 5},
-        sekisho_gateway:usage(~"openai", #{
+        sekisho_gateway:usage(~"openai", chat, #{
             ~"usage" => #{~"prompt_tokens" => 13, ~"completion_tokens" => 5}
         })
     ).
 
+usage_openai_embeddings_test() ->
+    %% embeddings carry only prompt_tokens; output is 0
+    ?assertEqual(
+        {9, 0},
+        sekisho_gateway:usage(~"openai", embeddings, #{
+            ~"usage" => #{~"prompt_tokens" => 9, ~"total_tokens" => 9}
+        })
+    ).
+
 usage_missing_test() ->
-    ?assertEqual({0, 0}, sekisho_gateway:usage(~"anthropic", #{~"content" => []})).
+    ?assertEqual({0, 0}, sekisho_gateway:usage(~"anthropic", chat, #{~"content" => []})).

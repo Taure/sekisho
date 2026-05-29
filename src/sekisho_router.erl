@@ -22,6 +22,9 @@ routes(_Environment) ->
                 {"/openai/v1/chat/completions", fun sekisho_openai_controller:chat/1, #{
                     methods => [post]
                 }},
+                {"/openai/v1/embeddings", fun sekisho_openai_controller:embeddings/1, #{
+                    methods => [post]
+                }},
                 {"/admin/upstreams", fun sekisho_admin_controller:create_upstream/1, #{
                     methods => [post]
                 }},

@@ -4,6 +4,7 @@
 -export([
     anthropic_lane_proxies_and_accounts/1,
     openai_lane_proxies/1,
+    openai_embeddings_proxies_and_accounts/1,
     budget_enforced/1,
     invalid_key_rejected/1,
     admin_requires_token/1,
@@ -24,6 +25,7 @@ all() ->
     [
         anthropic_lane_proxies_and_accounts,
         openai_lane_proxies,
+        openai_embeddings_proxies_and_accounts,
         budget_enforced,
         invalid_key_rejected,
         admin_requires_token,
@@ -85,6 +87,28 @@ openai_lane_proxies(Config) ->
     }),
     ?assertEqual(200, Code),
     ?assertMatch(#{~"id" := ~"chatcmpl_1"}, json:decode(Resp)).
+
+openai_embeddings_proxies_and_accounts(Config) ->
+    Base = ?config(stub_base, Config),
+    {ok, UpId} = sekisho_upstreams:create(#{
+        name => ~"stub-embeddings",
+        format => ~"openai",
+        base_url => Base,
+        auth_mode => ~"api_key",
+        credential => ~"AIza-stub"
+    }),
+    {ok, #{id := KeyId, token := Token}} = sekisho_keys:issue(~"team-e", UpId, infinity),
+    {Code, Resp} = post("/openai/v1/embeddings", Token, #{
+        ~"model" => ~"text-embedding-3-small", ~"input" => ~"hello"
+    }),
+    ?assertEqual(200, Code),
+    ?assertMatch(#{~"object" := ~"list"}, json:decode(Resp)),
+    %% prompt_tokens accounted as input, output 0
+    [Row] = ledger_rows(KeyId),
+    ?assertEqual(9, maps:get(input_tokens, Row)),
+    ?assertEqual(0, maps:get(output_tokens, Row)),
+    {ok, Key} = sekisho_upstreams_get_key(KeyId),
+    ?assertEqual(9, maps:get(spent_tokens, Key)).
 
 budget_enforced(Config) ->
     Base = ?config(stub_base, Config),
