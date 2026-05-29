@@ -19,7 +19,7 @@ are never logged or returned.
 
 ## How it works
 
-Two wire-compatible lanes, four upstreams, no format translation:
+Three wire-compatible lanes, four upstreams, no format translation:
 
 | Client format | Upstream | Auth |
 | --- | --- | --- |
@@ -27,6 +27,7 @@ Two wire-compatible lanes, four upstreams, no format translation:
 | Anthropic Messages | Claude on Vertex | GCP service account |
 | OpenAI Chat Completions | Gemini (OpenAI-compat) | API key |
 | OpenAI Chat Completions | Gemini on Vertex | GCP service account |
+| OpenAI Embeddings (`POST /openai/v1/embeddings`) | Gemini (OpenAI-compat) | API key |
 
 An "upstream" is just `{format, base_url, auth_mode, credential}`, so the public
 APIs and Vertex are the same abstraction differing only in config - a
@@ -39,11 +40,13 @@ provider's response unchanged.
 
 ## Status
 
-v0.1 in development. See [docs/adr/0001-gateway-security-model.md](docs/adr/0001-gateway-security-model.md)
-for the architecture and threat model.
+v0.1.3. See [docs/adr/0001-gateway-security-model.md](docs/adr/0001-gateway-security-model.md)
+for the architecture and threat model. SSE streaming passthrough (with usage
+accounting) and an OpenAI embeddings lane (`POST /openai/v1/embeddings`) have
+both shipped.
 
-Deferred from v0.1: streaming passthrough, cross-format translation, provider
-fallback, response caching, rate limiting beyond budgets.
+Deferred: cross-format translation, provider fallback, response caching, rate
+limiting beyond budgets.
 
 ## License
 

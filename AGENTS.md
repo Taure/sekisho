@@ -13,11 +13,15 @@ Part of a BEAM-native multi-agent stack (all under https://github.com/Taure):
 - **[saiten](https://github.com/Taure/saiten)** - runtime-agnostic eval/scoring
   + CI gate.
 - **[madoguchi](https://github.com/Taure/madoguchi)** - MCP *server* framework.
-- **sekisho** - LLM gateway / control plane: virtual keys, cost ledger, budgets,
-  and audit in front of Anthropic / Gemini / Vertex.
+- **sekisho** - LLM gateway / control plane: virtual keys, budgets, and audit in
+  front of Anthropic + OpenAI (chat and embeddings) + Vertex.
+- **[bunko](https://github.com/Taure/bunko)** - agent memory + RAG (pgvector).
+- **[banto](https://github.com/Taure/banto)** - multi-agent repo concierge; the
+  showcase consumer that wires the pillars together.
 
 Gakudan sister libs: **gakudan_metrics**, **gakudan_otel**, **gakudan_tickets**
-(+ **gakudan_tickets_github**), **gakudan_liveboard**.
+(+ **gakudan_tickets_github**), **gakudan_liveboard** (Nova + Datastar
+dashboard).
 
 **This repo** is the control plane beneath everything: any agent, tool, or
 service (in any language) routes its LLM traffic here for central keys, cost
@@ -34,8 +38,8 @@ is the priority - see [ADR 0001](docs/adr/0001-gateway-security-model.md).
   [ADR 0001](docs/adr/0001-gateway-security-model.md).
 - **Upstreams are config.** `{format, base_url, auth_mode, credential}` - public
   APIs and Vertex differ only in config (`api_key` vs `gcp_oauth`).
-- **Passthrough, not translation (v0.1).** Each client wire format
-  (Anthropic Messages, OpenAI Chat Completions) forwards to a matching-format
+- **Passthrough, not translation.** Each client wire format (Anthropic Messages,
+  OpenAI Chat Completions, OpenAI Embeddings) forwards to a matching-format
   upstream. Cross-format routing is deferred.
 
 ## Scope - what belongs here
