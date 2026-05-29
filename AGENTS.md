@@ -40,7 +40,8 @@ is the priority - see [ADR 0001](docs/adr/0001-gateway-security-model.md).
 
 ## Scope - what belongs here
 
-- **In (v0.1):** two lanes (Anthropic-format, OpenAI-format); four upstreams
+- **In (v0.1):** two lanes (Anthropic-format, OpenAI-format - chat completions +
+  embeddings); four upstreams
   (Anthropic, Claude-on-Vertex, Gemini OpenAI-compat, Gemini-on-Vertex);
   virtual-key issuance + verification; provider-credential encryption; GCP
   service-account OAuth; SSE streaming passthrough with usage accounting; usage

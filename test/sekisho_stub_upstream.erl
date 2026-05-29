@@ -29,6 +29,10 @@ json_reply(~"/chat/completions", Req) ->
     Resp =
         ~"{\"id\":\"chatcmpl_1\",\"choices\":[],\"usage\":{\"prompt_tokens\":13,\"completion_tokens\":5}}",
     cowboy_req:reply(200, json_ct(), Resp, Req);
+json_reply(~"/embeddings", Req) ->
+    Resp =
+        ~"{\"object\":\"list\",\"data\":[{\"object\":\"embedding\",\"index\":0,\"embedding\":[0.1,0.2,0.3]}],\"usage\":{\"prompt_tokens\":9,\"total_tokens\":9}}",
+    cowboy_req:reply(200, json_ct(), Resp, Req);
 json_reply(_Path, Req) ->
     cowboy_req:reply(200, json_ct(), ~"{}", Req).
 

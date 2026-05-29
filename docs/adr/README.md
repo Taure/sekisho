@@ -20,3 +20,4 @@ a merged ADR - supersede it.
 | --- | --- |
 | [0001](0001-gateway-security-model.md) | Gateway and security model |
 | [0002](0002-true-sse-streaming.md) | True SSE streaming via a Nova return-handler |
+| [0003](0003-openai-embeddings-lane.md) | OpenAI embeddings lane |
