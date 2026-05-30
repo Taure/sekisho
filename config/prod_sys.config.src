@@ -32,9 +32,9 @@
                 pool_module => kura_pool_pgo,
                 driver_module => kura_driver_pgo,
                 database => ~"${SEKISHO_DB}",
-                hostname => ~"${SEKISHO_DB_HOST}",
+                host => ~"${SEKISHO_DB_HOST}",
                 port => ${SEKISHO_DB_PORT},
-                username => ~"${SEKISHO_DB_USER}",
+                user => ~"${SEKISHO_DB_USER}",
                 password => ~"${SEKISHO_DB_PASSWORD}",
                 pool_size => 10
             }

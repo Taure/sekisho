@@ -29,9 +29,9 @@
                 pool_module => kura_pool_pgo,
                 driver_module => kura_driver_pgo,
                 database => ~"sekisho_test",
-                hostname => ~"localhost",
+                host => ~"localhost",
                 port => 5556,
-                username => ~"postgres",
+                user => ~"postgres",
                 password => ~"root",
                 pool_size => 10
             }
