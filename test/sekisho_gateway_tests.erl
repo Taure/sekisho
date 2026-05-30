@@ -107,3 +107,22 @@ usage_openai_embeddings_test() ->
 
 usage_missing_test() ->
     ?assertEqual({0, 0}, sekisho_gateway:usage(~"anthropic", chat, #{~"content" => []})).
+
+%% --- upstream_error_body (ADR 0004) ---
+
+upstream_error_passthrough_default_test() ->
+    application:unset_env(sekisho, mask_upstream_errors),
+    Raw = ~"{\"error\":{\"type\":\"not_found_error\",\"message\":\"model: x\"}}",
+    ?assertEqual(Raw, sekisho_gateway:upstream_error_body(404, Raw)).
+
+upstream_error_masked_when_enabled_test() ->
+    application:set_env(sekisho, mask_upstream_errors, true),
+    try
+        Raw = ~"{\"error\":{\"message\":\"provider detail\"}}",
+        Masked = sekisho_gateway:upstream_error_body(404, Raw),
+        ?assertNotEqual(Raw, Masked),
+        ?assertEqual(nomatch, binary:match(Masked, ~"provider detail")),
+        ?assertNotEqual(nomatch, binary:match(Masked, ~"upstream error"))
+    after
+        application:unset_env(sekisho, mask_upstream_errors)
+    end.

@@ -25,6 +25,7 @@ This mirrors the `gakudan_liveboard_sse` pattern (see novaframework/nova#387).
 -export([forward/2, forward/3, register/0, handle_stream/3]).
 %% Pure helpers, exported for unit tests.
 -export([key_from_headers/1, target_url/6, rewrite_body/4, usage/3, stream_usage/2]).
+-export([upstream_error_body/2]).
 
 -define(TIMEOUT, 120_000).
 -define(VERTEX_ANTHROPIC_VERSION, ~"vertex-2023-10-16").
@@ -106,7 +107,7 @@ do_request(Format, Op, Key, Model, Url, AuthHeaders, BodyMap) ->
             _ = sekisho_ledger:record(Key, Model, In, Out),
             {status, 200, json_headers(), RespBody};
         {ok, {{_, Code, _}, _RespHeaders, RespBody}} ->
-            {status, Code, json_headers(), RespBody};
+            {status, Code, json_headers(), upstream_error_body(Code, RespBody)};
         {error, Reason} ->
             ?LOG_ERROR(#{event => upstream_request_failed, reason => Reason}),
             {status, 502, json_headers(), json(#{error => ~"upstream error"})}
@@ -142,8 +143,8 @@ await_first(ReqId, Code, Headers, Req0, Spec) ->
             relay(ReqId, Req, Spec, <<>>);
         {http, {ReqId, {{_, UpCode, _}, _Hdrs, UpBody}}} ->
             %% Non-2xx: httpc does not stream it. Pass the provider status + body
-            %% through as a normal buffered reply.
-            passthrough_reply(Req0, UpCode, UpBody);
+            %% through as a normal buffered reply (masked when configured).
+            passthrough_reply(Req0, UpCode, upstream_error_body(UpCode, UpBody));
         {http, {ReqId, {error, Reason}}} ->
             ?LOG_ERROR(#{event => upstream_stream_error, reason => Reason}),
             error_reply(Req0, 502, ~"upstream error")
@@ -312,6 +313,21 @@ json_headers() ->
 
 json(Map) ->
     iolist_to_binary(json:encode(Map)).
+
+-doc """
+The body to return for a non-2xx upstream response. Passthrough (the provider's
+raw body) by default; a generic masked body when `mask_upstream_errors` is set.
+See ADR 0004. The upstream status code is preserved by the caller either way.
+""".
+-spec upstream_error_body(non_neg_integer(), binary()) -> binary().
+upstream_error_body(Code, RawBody) ->
+    case application:get_env(sekisho, mask_upstream_errors, false) of
+        true ->
+            ?LOG_INFO(#{event => upstream_error_masked, status => Code}),
+            json(#{error => ~"upstream error"});
+        false ->
+            RawBody
+    end.
 
 ensure_started() ->
     _ = inets:start(),
