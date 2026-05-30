@@ -21,9 +21,7 @@
         {dev_mode, false},
         {bootstrap_application, sekisho},
         {json_lib, json},
-        {plugins, [
-            {pre_request, nova_request_plugin, #{decode_json_body => true}}
-        ]}
+        {plugins, []}
     ]},
     {kura, [
         {dialect, kura_dialect_pg},
@@ -32,9 +30,9 @@
                 pool_module => kura_pool_pgo,
                 driver_module => kura_driver_pgo,
                 database => ~"${SEKISHO_DB}",
-                hostname => ~"${SEKISHO_DB_HOST}",
+                host => ~"${SEKISHO_DB_HOST}",
                 port => ${SEKISHO_DB_PORT},
-                username => ~"${SEKISHO_DB_USER}",
+                user => ~"${SEKISHO_DB_USER}",
                 password => ~"${SEKISHO_DB_PASSWORD}",
                 pool_size => 10
             }
